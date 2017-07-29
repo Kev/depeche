@@ -149,6 +149,7 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
             except:
                 pass
             logging.error("Couldn't run %s: %s", commandWords, e)
+            logging.error("Was running in %s", buildPath)
             removePath(installRoot)
             raise e
     removePath(buildPath)
@@ -302,8 +303,8 @@ class Definition:
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="dependenciesFile", help="path to the depeche.json file", default="depeche.json")
 parser.add_option("-c", "--cmake-file", dest="cmakeFile", help="path to the cmake file to produce", default="CMakeLists-depeche.txt")
-parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output", default=True)
-parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
+parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output")
+parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output", default=True)
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
 parser.set_defaults(loglevel=logging.INFO)
 (options, args) = parser.parse_args()
