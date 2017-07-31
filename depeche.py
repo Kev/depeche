@@ -14,39 +14,41 @@ from __future__ import print_function
 
 from optparse import OptionParser
 import os
-from StringIO import StringIO
+from io import StringIO
 import json
 import hashlib
+import logging
 import subprocess
 import shutil
 
 def safeMakeDir(root):
     try:
         if not os.path.exists(root):
-            if options.verbose: print("Creating", root)
+            logging.debug("Creating %s", root)
             os.makedirs(root)
     except Exception as e:
         raise Exception("Couldn't create %s", root)
 
 def removePath(root):
     if 'depeche' not in root:
-        print("I don't trust that I'm not going to ruin things, not removing folder without 'depeche' in the name")
+        logging.error("I don't trust that I'm not going to ruin things, not removing folder without 'depeche' in the name")
         return
+    logging.info("Removing directory %s", root)
     shutil.rmtree(root)
 
 def filenameEncode(contents):
-    return hashlib.sha1(contents).hexdigest()
+    return hashlib.sha1(contents.encode("utf-8")).hexdigest()
 
 def repositoryCachePath(source):
     return os.path.join(repositories, filenameEncode(source))
 
 def ensureRepository(source):
     path = repositoryCachePath(source)
-    if options.verbose: print("Checking for cache of repository", source, "in", path)
+    logging.debug("Checking for cache of repository %s in %s", source, path)
     if os.path.exists(path):
-        if options.verbose: print("Found")
+        logging.debug("Found")
         return
-    if options.verbose: print("Cloning")
+    logging.debug("Cloning")
     try:
         p = subprocess.check_call(['git', 'clone', "--bare", source, path])
         p = subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=path)
@@ -55,7 +57,7 @@ def ensureRepository(source):
             p.terminate()
         except:
             pass
-        print("Couldn't clone", source, "into", path, ":", e)
+        logging.error("Couldn't clone %s into %s: %s", source, path, e)
         removePath(path)
         raise e
 
@@ -64,7 +66,7 @@ updatedRepositories = []
 def updateRepositoryForPath(path):
     if path in updatedRepositories: return
     updatedRepositories.append(path)
-    if options.verbose: print("Updating git repo in",path)
+    logging.debug("Updating git repo in %s", path)
     try:
         p = subprocess.check_call(['git', 'fetch', 'origin'], cwd=path)
     except (Exception, KeyboardInterrupt) as e:
@@ -72,13 +74,13 @@ def updateRepositoryForPath(path):
             p.terminate()
         except:
             pass
-        print("Couldn't update", path, ":", e.message)
+        logging.error("Couldn't update %s: %s", path, e)
         raise e
 
 
 def updateRepository(source):
     path = repositoryCachePath(source)
-    if options.verbose: print("Updating", source, "in", path)
+    logging.debug("Updating %s in %s", source, path)
     updateRepositoryForPath(path)
 
 def rootPath(sourceKey, version, varsHash):
@@ -87,11 +89,11 @@ def rootPath(sourceKey, version, varsHash):
 def checkExists(source, sourceKey, version, varsHash):
     path = rootPath(sourceKey, version, varsHash)
     result = os.path.exists(path)
-    if options.verbose: print("Checking if", source, "/", version, "exists in", path, ":", result)
+    logging.debug("Checking if %s/%s exists in  %s: %s", source, version, path, result)
     return result
 
 def gitSubTreeCheckout(source, destination, commit, paths=['.'], allowRetry=True):
-    if options.verbose: print("Checking out subtree of", source, "in", destination, "version", commit)
+    logging.debug("Checking out subtree of %s in %s version %s", source, destination, commit)
     try:
         p = subprocess.check_call(['git', '--work-tree='+destination, 'checkout', commit, '--'] + paths, cwd=source)
     except (Exception, KeyboardInterrupt) as e:
@@ -99,21 +101,22 @@ def gitSubTreeCheckout(source, destination, commit, paths=['.'], allowRetry=True
             p.terminate()
         except:
             pass
-        print("Couldn't checkout", source, "into", destination, ":", e.message)
+        logging.error("Couldn't checkout %s into %s: %s", source, destination, e)
         if allowRetry:
-            print("Trying to update repository first")
+            logging.info("Trying to update repository first")
             updateRepositoryForPath(source)
             gitSubTreeCheckout(source, destination, commit, paths, False)
         else:
+            removePath(destination)
             raise e
 
 
 def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
     path = rootPath(sourceKey, version, varsHash)
     buildPath = os.path.join(tmpDir, filenameEncode(path))
-    if options.verbose: print("building", source, "into", path, "using", buildPath)
+    logging.debug("building %s into %s using %s", source, path, buildPath)
     if os.path.exists(buildPath):
-        print("Path already exists", buildPath)
+        logging.error("Path already exists: %s", buildPath)
         raise Exception("Exists")
     safeMakeDir(buildPath)
     cache = repositoryCachePath(source)
@@ -127,15 +130,17 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
             for k, v in varDict.items():
                 word = word.replace('%%'+k+'%%', v)
             if '%%' in word:
-                print("Unsubstituted parameter",word)
+                logging.error("Unsubstituted parameter %s", word)
                 raise Exception("unsubstituted parameter")
             commandWords.append(word)
         env = os.environ.copy()
         env.update(varDict)
+        if commandWords[0] in ('./scons', 'cmake', 'make', 'ninja') :
+            commandWords.insert(1, '-j4')
         subPath = buildPath
         if 'path' in commandMap:
             subPath = os.path.join(buildPath, commandMap['path'])
-        if options.verbose: print("Running:", commandWords, "in", subPath)
+        logging.debug("Running: %s in %s", commandWords, subPath)
         try:
             p = subprocess.check_call(commandWords, env=env, cwd=subPath)
         except (Exception, KeyboardInterrupt) as e:
@@ -143,7 +148,7 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
                 p.terminate()
             except:
                 pass
-            print("Couldn't run",commandWords,":", e.message)
+            logging.error("Couldn't run %s: %s", commandWords, e)
             removePath(installRoot)
             raise e
     removePath(buildPath)
@@ -155,7 +160,7 @@ def serializeDict(thing):
     return result
 
 def updateAllRepositories():
-    if options.verbose: print("Updating all repositories in",repositories)
+    logging.debug("Updating all repositories in %s", repositories)
     for filename in os.listdir(repositories):
         updateRepositoryForPath(os.path.join(repositories, filename))
 
@@ -183,7 +188,7 @@ class Definition:
         self.sourceKey = sourceKey
 
     def install(self):
-        if options.verbose: print("Checking for", self.source)
+        logging.debug("Checking for %s", self.source)
         for dependency in self.dependencies:
             dependency.install()
         if self.sourceKey:
@@ -192,14 +197,15 @@ class Definition:
             varDict['FULL_INSTALL'] = "True"
             varsHash = filenameEncode(serializeDict(varDict))
             version = self.dependencyVersions.get(self.source, None)
-            if options.verbose: print("Rootpath constructing:", self.sourceKey, version, varsHash)
+            logging.debug("Rootpath constructing: %s %s %s", self.sourceKey, version, varsHash)
             self.root = rootPath(self.sourceKey, version, varsHash)
             ensureRepository(self.source)
             varDict['INSTALL_ROOT'] = self.root
             if not version:
-                print("No version defined for", self.source)
+                logging.error("No version defined for %s", self.source)
                 raise Exception("No version defined")
             if not checkExists(self.source, self.sourceKey, version, varsHash):
+                logging.info("Building %s", self.name)
                 buildRepository(self.source, self.sourceKey, version, varsHash, varDict, self.buildSteps)
 
     def calculateVariables(self):
@@ -253,7 +259,7 @@ class Definition:
         self.dependencies.append(Definition(name, cachedFilename, encoding, self.dependencyVersions))
 
     def readFile(self, filename):
-        if options.verbose: print("Loading dependency file", filename)
+        logging.debug("Loading dependency file %s", filename)
         #TODO try:
         #     with open(filename, 'r') as f:
         #         parsed = json.load(f)
@@ -296,34 +302,38 @@ class Definition:
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="dependenciesFile", help="path to the depeche.json file", default="depeche.json")
 parser.add_option("-c", "--cmake-file", dest="cmakeFile", help="path to the cmake file to produce", default="CMakeLists-depeche.txt")
-parser.add_option("-v", "--verbose", dest="verbose", action="store_true", help="Print extra output", default=True)
-parser.add_option("-q", "--quiet", dest="verbose", action="store_false", help="Don't print output")
+parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output", default=True)
+parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
+parser.set_defaults(loglevel=logging.INFO)
 (options, args) = parser.parse_args()
 
+logging.basicConfig(format="%(message)s", level=options.loglevel)
+
+
 depecheHome = os.getenv("DEPECHE_HOME", os.path.expanduser("~/.depeche"))
-if options.verbose: print("Fetching dependencies from", options.dependenciesFile, "with DEPECHE_HOME", depecheHome)
+logging.debug("Fetching dependencies from %s with DEPECHE_HOME %s", options.dependenciesFile, depecheHome)
 repositories = os.path.join(depecheHome, "repositories") # global
 roots = os.path.join(depecheHome, "roots") # global
 tmpDir = os.path.join(depecheHome, "tmp") # global
 try:
     if not os.path.exists(repositories):
-        if options.verbose: print("Creating", repositories)
+        logging.debug("Creating", repositories)
         os.makedirs(repositories)
 except Exception as e:
-    print("Failed creating or testing", repositories)
+    logging.error("Failed creating or testing", repositories)
 try:
     if not os.path.exists(roots):
-        if options.verbose: print("Creating", roots)
+        logging.debug("Creating", roots)
         os.makedirs(roots)
 except Exception as e:
-    print("Failed creating or testing", roots)
+    logging.error("Failed creating or testing", roots)
 try:
     if not os.path.exists(tmpDir):
-        if options.verbose: print("Creating", tmpDir)
+        logging.debug("Creating", tmpDir)
         os.makedirs(tmpDir)
 except Exception as e:
-    print("Failed creating or testing", tmpDir)
+    logging.error("Failed creating or testing", tmpDir)
 
 if options.master:
     updateAllRepositories()
