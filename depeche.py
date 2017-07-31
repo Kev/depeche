@@ -14,7 +14,6 @@ from __future__ import print_function
 
 from optparse import OptionParser
 import os
-from io import StringIO
 import json
 import hashlib
 import logging
@@ -135,8 +134,6 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
             commandWords.append(word)
         env = os.environ.copy()
         env.update(varDict)
-        if commandWords[0] in ('./scons', 'cmake', 'make', 'ninja') :
-            commandWords.insert(1, '-j4')
         subPath = buildPath
         if 'path' in commandMap:
             subPath = os.path.join(buildPath, commandMap['path'])
@@ -168,12 +165,12 @@ def updateAllRepositories():
 
 class Definition:
     def __init__(self, name, filename, sourceKey, dependencyVersions):
-        parsed = self.readFile(filename)
         self.dependencies = []
         self.dependencyVersions = {}
         self.buildSteps = []
         self.neededVariables = []
         self.name = name
+        parsed = self.readFile(filename)
         if dependencyVersions:
             self.dependencyVersions = dependencyVersions
         else:
@@ -261,27 +258,11 @@ class Definition:
 
     def readFile(self, filename):
         logging.debug("Loading dependency file %s", filename)
-        #TODO try:
-        #     with open(filename, 'r') as f:
-        #         parsed = json.load(f)
-        # except Exception as e:
-        #     raise Exception("Couldn't read dependency file from %s" % cachedDepecheFile)
-
         try:
-            f = open(filename, 'r')
-            dependenciesJSON = f.read()
+            with open(filename) as f:
+                return json.load(f)
         except Exception as e:
-            # if options.debug:
-            #     raise
-            raise Exception("Couldn't read dependency file from %s" % filename)
-        f.close()
-        try:
-            dependencies = json.load(StringIO(dependenciesJSON))
-        except Exception as e:
-            # if options.debug:
-            #     raise
-            raise Exception("Invalid dependencies json in %s: %s" % (filename, e.message))
-        return dependencies
+            raise Exception("Invalid dependencies json in %s %s: %s" % (self.name, filename, e))
 
     def dependencyRoots(self):
         roots = {}
@@ -298,13 +279,13 @@ class Definition:
                 f.write("list(INSERT CMAKE_MODULE_PATH 0 '" + v + "')\n")
             f.close()
         except Exception as e:
-            raise Exception("Couldn't write cmake file %s, %s" % (cmakeFile, e.message))
+            raise Exception("Couldn't write cmake file %s, %s" % (cmakeFile, e))
 
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="dependenciesFile", help="path to the depeche.json file", default="depeche.json")
 parser.add_option("-c", "--cmake-file", dest="cmakeFile", help="path to the cmake file to produce", default="CMakeLists-depeche.txt")
 parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output")
-parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output", default=True)
+parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
 parser.set_defaults(loglevel=logging.INFO)
 (options, args) = parser.parse_args()
