@@ -48,9 +48,13 @@ def ensureRepository(source):
         return
     if options.verbose: print("Cloning")
     try:
-        subprocess.check_call(['git', 'clone', "--bare", source, path])
-        subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=path)
-    except Exception as e:
+        p = subprocess.check_call(['git', 'clone', "--bare", source, path])
+        p = subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=path)
+    except (Exception, KeyboardInterrupt) as e:
+        try:
+            p.terminate()
+        except:
+            pass
         print("Couldn't clone", source, "into", path, ":", e)
         removePath(path)
         raise e
@@ -62,8 +66,12 @@ def updateRepositoryForPath(path):
     updatedRepositories.append(path)
     if options.verbose: print("Updating git repo in",path)
     try:
-        subprocess.check_call(['git', 'fetch', 'origin'], cwd=path)
-    except Exception as e:
+        p = subprocess.check_call(['git', 'fetch', 'origin'], cwd=path)
+    except (Exception, KeyboardInterrupt) as e:
+        try:
+            p.terminate()
+        except:
+            pass
         print("Couldn't update", path, ":", e.message)
         raise e
 
@@ -85,8 +93,12 @@ def checkExists(source, sourceKey, version, varsHash):
 def gitSubTreeCheckout(source, destination, commit, paths=['.'], allowRetry=True):
     if options.verbose: print("Checking out subtree of", source, "in", destination, "version", commit)
     try:
-        subprocess.check_call(['git', '--work-tree='+destination, 'checkout', commit, '--'] + paths, cwd=source)
-    except Exception as e:
+        p = subprocess.check_call(['git', '--work-tree='+destination, 'checkout', commit, '--'] + paths, cwd=source)
+    except (Exception, KeyboardInterrupt) as e:
+        try:
+            p.terminate()
+        except:
+            pass
         print("Couldn't checkout", source, "into", destination, ":", e.message)
         if allowRetry:
             print("Trying to update repository first")
@@ -125,8 +137,12 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
             subPath = os.path.join(buildPath, commandMap['path'])
         if options.verbose: print("Running:", commandWords, "in", subPath)
         try:
-            subprocess.check_call(commandWords, env=env, cwd=subPath)
-        except Exception as e:
+            p = subprocess.check_call(commandWords, env=env, cwd=subPath)
+        except (Exception, KeyboardInterrupt) as e:
+            try:
+                p.terminate()
+            except:
+                pass
             print("Couldn't run",commandWords,":", e.message)
             removePath(installRoot)
             raise e
