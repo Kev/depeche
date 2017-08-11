@@ -47,7 +47,7 @@ def ensureRepository(source):
     if os.path.exists(path):
         logging.debug("Found")
         return
-    logging.debug("Cloning")
+    logging.debug("Cloning " + source)
     try:
         p = subprocess.check_call(['git', 'clone', "--bare", source, path])
         p = subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=path)
@@ -220,7 +220,7 @@ class Definition:
         if sourceType == "file":
             self.populateFileDependency(name, source)
         elif sourceType == "git":
-             self.populateGitDependency(name, source, self.dependencyVersions[source])
+            self.populateGitDependency(name, source, self.dependencyVersions[source])
         else:
             raise Exception("Invalid source type %s for %s", sourceType, source)
 
@@ -272,11 +272,18 @@ class Definition:
 
     def writeCMakeFile(self, cmakeFile):
         try:
+            dependencies = self.dependencyRoots().items()
+            # Move dependency with CMAKE in its name (e.g. for cmake.git) to the front,
+            # so it is preprended first and ends last in the list of CMAKE_MODULE_PATH 
+            cmakeValue = next((x for x in dependencies if "CMAKE" in x[0]), None)
+            if cmakeValue:
+                cmakeValueIndex = dependencies.index(cmakeValue)
+                dependencies.insert(0, dependencies.pop(cmakeValueIndex))
             f = open(cmakeFile, 'w')
-            for k,v in self.dependencyRoots().items():
+            for k,v in dependencies:
                 f.write("SET(" + k + " " + v + ")\n")
-            for k,v in self.dependencyRoots().items():
-                f.write("list(INSERT CMAKE_MODULE_PATH 0 '" + v + "')\n")
+            for k,v in dependencies:
+                f.write("list(INSERT CMAKE_MODULE_PATH 0 \"" + v + "\")\n")
             f.close()
         except Exception as e:
             raise Exception("Couldn't write cmake file %s, %s" % (cmakeFile, e))
