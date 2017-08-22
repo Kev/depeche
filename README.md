@@ -6,7 +6,7 @@ Versioned dependency cacheing
 
 ### Building a project using depeche
 
-Building a project with depeche should be transparent, other than needing to have `depeche.py` in your $PATH, and the build system (typically cmake) will then call out to depeche.
+Building a project with depeche should be transparent, other than needing to have `depeche.py` in your `$PATH`, and the build system (typically cmake) will then call out to depeche.
 
 ### Running depeche manually
 
@@ -15,7 +15,7 @@ If you want to run depeche manually, just ensure you're in the folder of your pr
 
 ### Integrating depeche with cmake
 
-Near the top of your project's root CMakeLists.txt, put
+Near the top of your project's root `CMakeLists.txt`, put
 
 ```
 execute_process(COMMAND "depeche.py" WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -23,16 +23,16 @@ configure_file(depeche.json ignore.txt)
 include(CMakeLists-depeche.txt)
 ```
 
-The first line calls depeche, which will spit out CMakeLists-depeche.txt. The second line forces a configure-time dependency on depeche.json, which ensures cmake will be ru-run (and in turn so will depeche) whenever the depeche dependencies change - so you should never need to re-run depeche manually (you probably want to .gitignore ignore.txt). The last line then pulls in the generated file, which contains the install paths for all the dependencies. If you want to use the installed cmake find modules, something like:
+The first line calls depeche, which will spit out `CMakeLists-depeche.txt`. The second line forces a configure-time dependency on depeche.json, which ensures cmake will be ru-run (and in turn so will depeche) whenever the depeche dependencies change - so you should never need to re-run depeche manually (you probably want to `.gitignore` `ignore.txt`). The last line then pulls in the generated file, which contains the install paths for all the dependencies. If you want to use the installed cmake find modules, something like:
 ```
 set(CMAKE_MODULE_PATH "${OPENSSL_ROOT}")
 find_package(OpenSSL REQUIRED)
 ```
-should do the trick (`OPENSSL_ROOT` is defined as part of CMakeLists-depeche.txt if you have a dependency named 'Openssl' (caps don't matter)).
+should do the trick (`OPENSSL_ROOT` is defined as part of `CMakeLists-depeche.txt` if you have a dependency named 'Openssl' (caps don't matter)).
 
 ### Writing a depeche.json for your project
 
-Your project's depeche.json only defines dependencies and their versions (i.e. doesn't say how to build the current project). Something like:
+Your project's `depeche.json` only defines dependencies and their versions (i.e. doesn't say how to build the current project). Something like:
 ```
 {
     "dependencies": [
@@ -59,13 +59,22 @@ Conversely, the depeche.json for a dependency repository has to say how it's bui
 		{"sourceType": "git", "source": "ssh://gitserver/cmake.git", "name": "cmake"}
 	],
 	"buildSteps": [
-		{"command": ["%%CMAKE_ROOT%%/build.sh", "newbuild"]},
-		{"command": ["%%CMAKE_ROOT%%/build.sh", "install"]},
-		{"command": ["cp", "-r", "include", "%%INSTALL_ROOT%%/"]}
-	]
+        {
+            "condition": "os == 'Linux'",
+            "commands": [
+                {"command": ["%%CMAKE_ROOT%%/build.sh", "newbuild"]},
+                {"command": ["%%CMAKE_ROOT%%/build.sh", "install"]},
+                {"command": ["cp", "-r", "include", "%%INSTALL_ROOT%%/"]}
+            ]
+        }
+    ],
+    "neededVariables": ["os"]
 }
 ```
-This gives the three commands that are run when building the dependency, and says it depends on the cmake repository. %%INSTALL_ROOT%% is the path into which this dependency must install. In this example, %%CMAKE_ROOT%% is also used - this is the install root of the dependency with name 'cmake', and is only defined because this dependency itself depends on cmake.git.
+This gives the three commands that are run when building the dependency, and says it depends on the cmake repository. `%%INSTALL_ROOT%%` is the path into which this dependency must install. In this example, `%%CMAKE_ROOT%%` is also used - this is the install root of the dependency with name 'cmake', and is only defined because this dependency itself depends on cmake.git.
+
+The `"condition": "os == 'Linux'"` part specifies, that these commands are only run on Linux.
+The `neededVariables` key provides the list of variables that are required by this build and are made available in condition tests. Conditons are Python code strings which are evaluated with only the previously specified variables available to the code. The variables need to be fed in via the `-e` flag as a JSON file.
 
 ## How it works
 

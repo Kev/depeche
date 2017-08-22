@@ -41,23 +41,38 @@ def filenameEncode(contents):
 def repositoryCachePath(source):
     return os.path.join(repositories, filenameEncode(source))
 
+def repositoryWorkingPath(source):
+    return os.path.join(workings, filenameEncode(source))
+
 def ensureRepository(source):
-    path = repositoryCachePath(source)
-    logging.debug("Checking for cache of repository %s in %s", source, path)
-    if os.path.exists(path):
+    cachePath = repositoryCachePath(source)
+    workPath = repositoryWorkingPath(source)
+    logging.debug("Checking for cache of repository %s in %s", source, cachePath)
+    if os.path.exists(cachePath):
+        try:
+            p = subprocess.check_call(['git', 'fetch', "work"], cwd=cachePath)
+        except (Exception, KeyboardInterrupt) as e:
+            try:
+                p.terminate()
+            except:
+                pass
+            logging.error("Couldn't fetch working checkout for %s, %s: %s", source, cachePath, e)
         logging.debug("Found")
         return
     logging.debug("Cloning " + source)
     try:
-        p = subprocess.check_call(['git', 'clone', "--bare", source, path])
-        p = subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=path)
+        p = subprocess.check_call(['git', 'clone', "--bare", source, cachePath])
+        p = subprocess.check_call(['git', 'config', "remote.origin.fetch", '+refs/heads/*:refs/remotes/origin/*'], cwd=cachePath)
+        p = subprocess.check_call(['git', 'clone', source, workPath])
+        p = subprocess.check_call(['git', 'remote', "add", 'work', workPath], cwd=cachePath)
     except (Exception, KeyboardInterrupt) as e:
         try:
             p.terminate()
         except:
             pass
-        logging.error("Couldn't clone %s into %s: %s", source, path, e)
-        removePath(path)
+        logging.error("Couldn't clone %s into %s: %s", source, cachePath, e)
+        removePath(cachePath)
+        removePath(workPath)
         raise e
 
 updatedRepositories = []
@@ -122,10 +137,25 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
     gitSubTreeCheckout(cache, buildPath, version)
     installRoot = varDict['INSTALL_ROOT']
     safeMakeDir(installRoot)
+
+    commandsToExecute = []
     for commandMap in commands:
-        command = commandMap['command']
+        if 'command' in commandMap:
+            commandsToExecute.append(commandMap)
+        elif 'commands' in commandMap:
+            if 'condition' in commandMap:
+                if eval(commandMap['condition'], {'__builtin__':None}, varDict):
+                    for command in commandMap['commands']:
+                        commandsToExecute.append(command)
+                else:
+                    logging.debug("Commands condition '%s' failed for commmands '%s'.", commandMap['condition'], commandMap['commands'])
+        else:
+            logging.error("Unsupported buildSteps value.")
+            raise Exception("Unsupported buildSteps value.")
+
+    for command in commandsToExecute:
         commandWords = []
-        for word in command:
+        for word in command['command']:
             for k, v in varDict.items():
                 word = word.replace('%%'+k+'%%', v)
             if '%%' in word:
@@ -135,8 +165,8 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
         env = os.environ.copy()
         env.update(varDict)
         subPath = buildPath
-        if 'path' in commandMap:
-            subPath = os.path.join(buildPath, commandMap['path'])
+        if 'path' in command:
+            subPath = os.path.join(buildPath, command['path'])
         logging.debug("Running: %s in %s", commandWords, subPath)
         try:
             p = subprocess.check_call(commandWords, env=env, cwd=subPath)
@@ -164,13 +194,18 @@ def updateAllRepositories():
 
 
 class Definition:
-    def __init__(self, name, filename, sourceKey, dependencyVersions):
+    def __init__(self, name, depecheFilename, depecheVarFilename, sourceKey, dependencyVersions):
         self.dependencies = []
         self.dependencyVersions = {}
         self.buildSteps = []
         self.neededVariables = []
         self.name = name
-        parsed = self.readFile(filename)
+        self.depecheVarFilename = depecheVarFilename
+        self.depecheVars = {}
+        parsed = self.readFile(depecheFilename)
+        if depecheVarFilename:
+            self.depecheVars = self.readFile(depecheVarFilename)
+
         if dependencyVersions:
             self.dependencyVersions = dependencyVersions
         else:
@@ -180,7 +215,7 @@ class Definition:
             self.populateDependency(dependency)
         for buildStep in parsed.get('buildSteps', []):
             self.buildSteps.append(buildStep)
-        for variable in parsed.get('variables', []):
+        for variable in parsed.get('neededVariables', []):
             self.neededVariables.append(variable)
         self.source = parsed.get('source', sourceKey)
         self.sourceKey = sourceKey
@@ -207,10 +242,14 @@ class Definition:
                 buildRepository(self.source, self.sourceKey, version, varsHash, varDict, self.buildSteps)
 
     def calculateVariables(self):
-        possibleVars = {}
+        possibleVars = self.depecheVars
         result = self.dependencyRoots()
         for key in self.neededVariables:
-            result[key] = possibleVars[key]
+            if key in possibleVars:
+                result[key] = possibleVars[key]
+            else:
+                logging.error("Missing variable '%s'. Please check depeche-var.json.", key)
+                raise Exception("Missing variable '%s'. Please check depeche-var.json.", key)
         return result
 
     def populateDependency(self, dependency):
@@ -231,7 +270,7 @@ class Definition:
         cachedDepecheFile = os.path.join(cachedDepecheDir, 'depeche.json')
         if not os.path.exists(cachedDepecheFile):
             gitSubTreeCheckout(repositoryCachePath(source), cachedDepecheDir, commit, ['depeche.json'])
-        self.dependencies.append(Definition(name, cachedDepecheFile, source, self.dependencyVersions))
+        self.dependencies.append(Definition(name, cachedDepecheFile, self.depecheVarFilename, source, self.dependencyVersions))
 
     def populateFileDependency(self, name, filename):
         try:
@@ -254,15 +293,15 @@ class Definition:
                 f.close()
             except Exception as e:
                 raise Exception("Couldn't cache dependency file from %s to %s" % filename, cachedFilename)
-        self.dependencies.append(Definition(name, cachedFilename, encoding, self.dependencyVersions))
+        self.dependencies.append(Definition(name, cachedFilename, self.depecheVarFilename, encoding, self.dependencyVersions))
 
     def readFile(self, filename):
-        logging.debug("Loading dependency file %s", filename)
+        logging.debug("Loading JSON file %s", filename)
         try:
             with open(filename) as f:
                 return json.load(f)
         except Exception as e:
-            raise Exception("Invalid dependencies json in %s %s: %s" % (self.name, filename, e))
+            raise Exception("Invalid JSON in %s %s: %s" % (self.name, filename, e))
 
     def dependencyRoots(self):
         roots = {}
@@ -274,7 +313,7 @@ class Definition:
         try:
             dependencies = self.dependencyRoots().items()
             # Move dependency with CMAKE in its name (e.g. for cmake.git) to the front,
-            # so it is preprended first and ends last in the list of CMAKE_MODULE_PATH 
+            # so it is preprended first and ends last in the list of CMAKE_MODULE_PATH
             cmakeValue = next((x for x in dependencies if "CMAKE" in x[0]), None)
             if cmakeValue:
                 cmakeValueIndex = dependencies.index(cmakeValue)
@@ -291,6 +330,7 @@ class Definition:
 parser = OptionParser()
 parser.add_option("-f", "--file", dest="dependenciesFile", help="path to the depeche.json file", default="depeche.json")
 parser.add_option("-c", "--cmake-file", dest="cmakeFile", help="path to the cmake file to produce", default="CMakeLists-depeche.txt")
+parser.add_option("-e", "--environment", dest="variables", help="path to the depeche-var.json file, defining config variables used by depeche")
 parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output")
 parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
@@ -303,30 +343,38 @@ logging.basicConfig(format="%(message)s", level=options.loglevel)
 depecheHome = os.getenv("DEPECHE_HOME", os.path.expanduser("~/.depeche"))
 logging.debug("Fetching dependencies from %s with DEPECHE_HOME %s", options.dependenciesFile, depecheHome)
 repositories = os.path.join(depecheHome, "repositories") # global
+workings = os.path.join(depecheHome, "work") # global
 roots = os.path.join(depecheHome, "roots") # global
 tmpDir = os.path.join(depecheHome, "tmp") # global
+
 try:
     if not os.path.exists(repositories):
         logging.debug("Creating", repositories)
         os.makedirs(repositories)
 except Exception as e:
-    logging.error("Failed creating or testing", repositories)
+    logging.error("Failed creating or testing %s", repositories)
+try:
+    if not os.path.exists(workings):
+        logging.debug("Creating", workings)
+        os.makedirs(workings)
+except Exception as e:
+    logging.error("Failed creating or testing", workings)
 try:
     if not os.path.exists(roots):
         logging.debug("Creating", roots)
         os.makedirs(roots)
 except Exception as e:
-    logging.error("Failed creating or testing", roots)
+    logging.error("Failed creating or testing %s", roots)
 try:
     if not os.path.exists(tmpDir):
         logging.debug("Creating", tmpDir)
         os.makedirs(tmpDir)
 except Exception as e:
-    logging.error("Failed creating or testing", tmpDir)
+    logging.error("Failed creating or testing %s", tmpDir)
 
 if options.master:
     updateAllRepositories()
 
-defs = Definition("root project", options.dependenciesFile, None, None)
+defs = Definition("root project", options.dependenciesFile, options.variables, None, None)
 defs.install()
 defs.writeCMakeFile(options.cmakeFile)
