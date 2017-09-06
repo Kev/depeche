@@ -66,6 +66,14 @@ Conversely, the depeche.json for a dependency repository has to say how it's bui
                 {"command": ["%%CMAKE_ROOT%%/build.sh", "install"]},
                 {"command": ["cp", "-r", "include", "%%INSTALL_ROOT%%/"]}
             ]
+        },
+        {
+            "condition": "os == 'Darwin'",
+            "commands": [
+                {"command": ["%%CMAKE_ROOT%%/build.sh", "newbuild"]},
+                {"command": ["%%CMAKE_ROOT%%/build.sh", "install"]},
+                {"command": ["ditto", "include", "%%INSTALL_ROOT%%/"]}
+            ]
         }
     ],
     "neededVariables": ["os"]
