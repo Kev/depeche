@@ -347,6 +347,8 @@ parser.add_option("-e", "--environment", dest="variables", help="path to the dep
 parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output")
 parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
+parser.add_option("", "--cache_dir", dest="cacheDir", help="Path storing the repository", default=None)
+parser.add_option("-w", "--work_dir", dest="workDir", help="Path storing the working checkout of the repository", default=None)
 parser.set_defaults(loglevel=logging.INFO)
 (options, args) = parser.parse_args()
 
@@ -388,6 +390,17 @@ except Exception as e:
 if options.master:
     updateAllRepositories()
 
-defs = Definition("root project", options.dependenciesFile, options.variables, None, None)
-defs.install()
-defs.writeCMakeFile(options.cmakeFile)
+run = True
+
+if options.cacheDir:
+    print("Repository " + options.cacheDir + " will be cached at " + repositoryCachePath(options.cacheDir))
+    run = False
+
+if options.workDir:
+    print("Repository " + options.workDir + " will have a working copy at " + repositoryWorkingPath(options.workDir))
+    run = False
+
+if run:
+    defs = Definition("root project", options.dependenciesFile, options.variables, None, None)
+    defs.install()
+    defs.writeCMakeFile(options.cmakeFile)
