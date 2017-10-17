@@ -142,6 +142,7 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
     path = rootPath(sourceKey, version, varsHash)
     buildPath = os.path.join(tmpDir, filenameEncode(path))
     logging.debug("building %s into %s using %s", source, path, buildPath)
+    logging.debug("Variables: %s", varDict)
     if os.path.exists(buildPath):
         if options.keep:
             logging.error("Path already exists: %s", buildPath)
