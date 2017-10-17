@@ -143,8 +143,11 @@ def buildRepository(source, sourceKey, version, varsHash, varDict, commands):
     buildPath = os.path.join(tmpDir, filenameEncode(path))
     logging.debug("building %s into %s using %s", source, path, buildPath)
     if os.path.exists(buildPath):
-        logging.error("Path already exists: %s", buildPath)
-        raise Exception("Exists")
+        if options.keep:
+            logging.error("Path already exists: %s", buildPath)
+            raise Exception("Exists")
+        else:
+            removePath(buildPath)
     safeMakeDir(buildPath)
     cache = repositoryCachePath(source)
     gitSubTreeCheckout(cache, buildPath, version)
@@ -347,6 +350,7 @@ parser.add_option("-e", "--environment", dest="variables", help="path to the dep
 parser.add_option("-v", "--verbose", dest="loglevel", action="store_const", const=logging.DEBUG, help="Print extra output")
 parser.add_option("-q", "--quiet", dest="loglevel", action="store_const", const=logging.ERROR, help="Don't print output")
 parser.add_option("-m", "--master", dest="master", action="store_true", help="Update all cached repositories", default=False)
+parser.add_option("-k", "--keep", dest="keep", action="store_true", help="Don't replace existing temporary trees (if previous compilation failed)", default=False)
 parser.add_option("", "--cache_dir", dest="cacheDir", help="Path storing the repository", default=None)
 parser.add_option("-w", "--work_dir", dest="workDir", help="Path storing the working checkout of the repository", default=None)
 parser.set_defaults(loglevel=logging.INFO)
